@@ -1,9 +1,6 @@
 (function () {
   "use strict";
 
-  // =========================================================================
-  // KONFIGURASI NAMA KOMUNITAS (Bisa kamu ganti kapan saja di sini)
-  // =========================================================================
   const COMMUNITY = {
     name: "Kevnai Community",
     shortName: "KevnaiHub",
@@ -16,8 +13,7 @@
   const DIRECT_BASE = "https://api.iroha-api.web.id";
   const FALLBACK_KEY = "iroha_267d3ed4b6d2afa34b83e7aa6747ee35bd29c9d7eea10cd6";
 
-  // State Aplikasi Terisolasi (Agar Kategori Tidak Pernah Tercampur)
-  let activeHub = "lobby"; // 'lobby' | 'anime' | 'donghua' | 'loklok' | 'wattpad' | 'saved' | 'history'
+  let activeHub = "lobby";
   let activeSubTab = "home";
   let activePage = 1;
   let loklokNavId = "1000004";
@@ -26,19 +22,27 @@
   let activeGenreName = "";
   let currentSeries = null;
   let currentEpisodes = [];
-  let activeEpRange = 0; // Filter per 50 episode
+  let activeEpRange = 0;
   let activeServers = [];
   let hlsInstance = null;
   let lightsOff = false;
 
-  // =========================================================================
-  // UTILITAS KEAMANAN, PEMBERSIH TEKS & POSTER PINTAR
-  // =========================================================================
+  // Pastikan elemen #app selalu ada walaupun index.html minimalis
+  function getAppContainer() {
+    let el = document.getElementById("app");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "app";
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+
   function escapeHTML(str) {
     if (str === null || str === undefined) return "";
-    return String(str).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    }[c]));
+    return String(str).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
   }
 
   function formatNumber(n) {
@@ -62,9 +66,9 @@
   }
 
   function cleanBadge(rawBadge, rawTitle) {
-    const combined = `${rawBadge || ""} ${rawTitle || ""}`;
+    const combined = (rawBadge || "") + " " + (rawTitle || "");
     const epMatch = combined.match(/(?:episode|eps|ep)\s*(\d+(?:\.\d+)?)/i);
-    if (epMatch) return `Ep ${epMatch[1]}`;
+    if (epMatch) return "Ep " + epMatch[1];
     if (!rawBadge) return "Sub Indo";
     const s = String(rawBadge)
       .replace(/\(good\s*sub\)/gi, "")
@@ -72,19 +76,19 @@
       .replace(/\(download\s*link\)/gi, "")
       .replace(/subtitle\s*indonesia/gi, "")
       .trim();
-    if (/^\d+$/.test(s)) return `Ep ${s}`;
+    if (/^\d+$/.test(s)) return "Ep " + s;
     return s.slice(0, 14) || "Tersedia";
   }
 
   function cleanEpNumber(rawEpTitle, fallbackNum) {
-    if (!rawEpTitle) return `Ep ${fallbackNum}`;
+    if (!rawEpTitle) return "Ep " + fallbackNum;
     const str = String(rawEpTitle).trim();
-    if (/^\d+(\.\d+)?$/.test(str)) return `Ep ${str}`;
+    if (/^\d+(\.\d+)?$/.test(str)) return "Ep " + str;
     const m =
       str.match(/(?:episode|eps|ep)\s*(\d+(?:\.\d+)?)/i) ||
       str.match(/-\s*(\d+(?:\.\d+)?)\s*(?:subtitle|sub|end|$)/i) ||
       str.match(/(\d+(?:\.\d+)?)\s*$/);
-    return m ? `Ep ${m[1]}` : `Ep ${fallbackNum}`;
+    return m ? "Ep " + m[1] : "Ep " + fallbackNum;
   }
 
   function resolvePoster(item) {
@@ -112,16 +116,15 @@
         if (u) raw = decodeURIComponent(u);
       } catch (e) {}
     } else if (raw.startsWith("/")) {
-      return `${DIRECT_BASE}${raw}${raw.includes("?") ? "&" : "?"}apikey=${FALLBACK_KEY}`;
+      return DIRECT_BASE + raw + (raw.includes("?") ? "&" : "?") + "apikey=" + FALLBACK_KEY;
     }
 
     if (raw.startsWith("http")) {
-      return `https://wsrv.nl/?url=${encodeURIComponent(raw)}&w=420&output=webp`;
+      return "https://wsrv.nl/?url=" + encodeURIComponent(raw) + "&w=420&output=webp";
     }
     return "";
   }
 
-  // Pencari Sampul Otomatis (Jika API Donghua/Anime tidak menyertakan URL poster)
   const coverCache = {};
   async function fetchMissingCover(imgEl) {
     if (!imgEl || imgEl.dataset.tried === "1") return;
@@ -137,7 +140,7 @@
     }
 
     try {
-      const q = `query ($s: String) { Media(search: $s, type: ANIME) { coverImage { large } } }`;
+      const q = "query ($s: String) { Media(search: $s, type: ANIME) { coverImage { large } } }";
       const res = await fetch("https://graphql.anilist.co", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -154,15 +157,14 @@
   }
 
   function hydratePosters() {
-    document.querySelectorAll("img.lazy-poster").forEach((img) => {
+    document.querySelectorAll("img.lazy-poster").forEach(function (img) {
       if (!img.getAttribute("src")) fetchMissingCover(img);
     });
   }
 
-  // Fetcher Dual-Mode (Utamakan /api/iroha di Vercel, Fallback Direct di Localhost)
   async function irohaFetch(path) {
     try {
-      const res = await fetch(`/api/iroha?path=${encodeURIComponent(path)}`);
+      const res = await fetch("/api/iroha?path=" + encodeURIComponent(path));
       const cType = res.headers.get("content-type") || "";
       if (res.ok && cType.includes("json")) {
         return await res.json();
@@ -170,21 +172,18 @@
     } catch (e) {}
 
     const sep = path.includes("?") ? "&" : "?";
-    const direct = `${DIRECT_BASE}${path}${sep}apikey=${FALLBACK_KEY}`;
+    const direct = DIRECT_BASE + path + sep + "apikey=" + FALLBACK_KEY;
     const response = await fetch(direct, { headers: { "X-API-Key": FALLBACK_KEY } });
-    if (!response.ok) throw new Error("Server merespons " + response.status);
+    if (!response.ok) throw new Error("Server status " + response.status);
     return await response.json();
   }
 
-  // =========================================================================
-  // MANAJEMEN RIWAYAT TONTONAN, BOOKMARK & EPISODE TERTONTON
-  // =========================================================================
   function getSavedList() {
     try { return JSON.parse(localStorage.getItem("kh_saved_list") || "[]"); } catch (e) { return []; }
   }
 
   function isItemSaved(id) {
-    return getSavedList().some((x) => String(x.id) === String(id));
+    return getSavedList().some(function (x) { return String(x.id) === String(id); });
   }
 
   function toggleSaveCurrent() {
@@ -192,7 +191,7 @@
     let list = getSavedList();
     const exists = isItemSaved(currentSeries.id);
     if (exists) {
-      list = list.filter((x) => String(x.id) !== String(currentSeries.id));
+      list = list.filter(function (x) { return String(x.id) !== String(currentSeries.id); });
       notify("Dihapus dari daftar simpanan");
     } else {
       list.unshift({
@@ -209,7 +208,7 @@
     const btn = document.getElementById("saveSeriesBtn");
     if (btn) {
       const nowSaved = !exists;
-      btn.innerHTML = `<i class="fa-${nowSaved ? "solid" : "regular"} fa-bookmark"></i> ${nowSaved ? "Tersimpan" : "Simpan"}`;
+      btn.innerHTML = '<i class="fa-' + (nowSaved ? "solid" : "regular") + ' fa-bookmark"></i> ' + (nowSaved ? "Tersimpan" : "Simpan");
     }
   }
 
@@ -233,9 +232,13 @@
   function recordWatchHistory(entry) {
     try {
       let list = JSON.parse(localStorage.getItem("kh_watch_history") || "[]");
-      list = list.filter((x) => String(x.seriesId) !== String(entry.seriesId));
+      list = list.filter(function (x) { return String(x.seriesId) !== String(entry.seriesId); });
       list.unshift({
-        ...entry,
+        hub: entry.hub,
+        seriesId: entry.seriesId,
+        title: entry.title,
+        epLabel: entry.epLabel,
+        category: entry.category,
         time: new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
       });
       localStorage.setItem("kh_watch_history", JSON.stringify(list.slice(0, 30)));
@@ -246,9 +249,6 @@
     try { return JSON.parse(localStorage.getItem("kh_watch_history") || "[]"); } catch (e) { return []; }
   }
 
-  // =========================================================================
-  // DESAIN CSS SINEMA MODERN (FLAT, CLEAN, NATURAL SEPERTI WEB STREAMING UMUM)
-  // =========================================================================
   function injectStyles() {
     document.head.insertAdjacentHTML(
       "beforeend",
@@ -282,12 +282,11 @@
         a { color: inherit; text-decoration: none; }
         button, input { font-family: inherit; }
 
-        /* Top Sticky Navbar */
         .top-navbar {
           position: sticky;
           top: 0;
           z-index: 100;
-          background: rgba(11, 13, 20, 0.88);
+          background: rgba(11, 13, 20, 0.9);
           backdrop-filter: blur(14px);
           border-bottom: 1px solid var(--border-subtle);
         }
@@ -373,14 +372,12 @@
         }
         .search-form button:hover { background: var(--accent); color: #000; }
 
-        /* Main Container */
         .main-wrap {
           max-width: 1180px;
           margin: 0 auto;
           padding: 20px 16px 40px;
         }
 
-        /* Breadcrumb */
         .breadcrumb {
           display: flex;
           align-items: center;
@@ -393,7 +390,6 @@
         .breadcrumb span.clickable { cursor: pointer; color: var(--accent); }
         .breadcrumb span.clickable:hover { text-decoration: underline; }
 
-        /* Lobby Welcome Banner */
         .lobby-banner {
           background: linear-gradient(135deg, #161f33 0%, #0f1420 100%);
           border: 1px solid var(--border-subtle);
@@ -423,7 +419,6 @@
           max-width: 680px;
         }
 
-        /* 4 Lobby Hub Cards */
         .hub-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -460,7 +455,7 @@
         }
         .hub-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
         .hub-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.45; }
-        .hub-Enter {
+        .hub-enter {
           font-size: 12.5px;
           font-weight: 600;
           color: var(--accent);
@@ -469,7 +464,6 @@
           gap: 6px;
         }
 
-        /* Sub-Tabs / Filter Bar */
         .filter-bar {
           display: flex;
           align-items: center;
@@ -499,7 +493,6 @@
           border-color: var(--accent);
         }
 
-        /* Media Poster Grid */
         .section-header {
           display: flex;
           align-items: center;
@@ -579,13 +572,7 @@
           overflow: hidden;
           line-height: 1.4;
         }
-        .media-sub {
-          font-size: 11.5px;
-          color: var(--text-secondary);
-          margin-top: 6px;
-        }
 
-        /* Skeleton Loading */
         .skeleton-card {
           background: var(--bg-surface);
           border-radius: var(--radius-md);
@@ -610,7 +597,6 @@
           100% { background-position: -200% 0; }
         }
 
-        /* Wattpad Story Cards */
         .wattpad-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -653,7 +639,6 @@
           flex-wrap: wrap;
         }
 
-        /* Detail Series Box */
         .surface-card {
           background: var(--bg-surface);
           border: 1px solid var(--border-subtle);
@@ -682,7 +667,6 @@
         .detail-content h1 { font-size: clamp(20px, 4vw, 26px); font-weight: 800; margin-bottom: 8px; }
         .detail-synopsis { font-size: 13.5px; color: var(--text-secondary); line-height: 1.65; margin-bottom: 16px; }
 
-        /* Buttons */
         .btn {
           background: var(--bg-elevated);
           border: 1px solid var(--border-subtle);
@@ -701,7 +685,6 @@
         .btn.primary { background: var(--accent); color: #090d16; border-color: var(--accent); }
         .btn.primary:hover { filter: brightness(1.08); }
 
-        /* Episode Grid */
         .ep-grid {
           display: grid;
           grid-template-columns: repeat(auto-fill, minmax(95px, 1fr));
@@ -729,7 +712,6 @@
           color: #34d399;
         }
 
-        /* Video Player & Cinema Overlay */
         .cinema-dim {
           position: fixed;
           inset: 0;
@@ -750,7 +732,6 @@
         }
         .video-box video, .video-box iframe { width: 100%; height: 100%; border: none; display: block; }
 
-        /* Pagination */
         .pagination {
           display: flex;
           justify-content: center;
@@ -759,7 +740,6 @@
           margin-top: 26px;
         }
 
-        /* Bottom Mobile Navigation */
         .bottom-nav {
           position: fixed;
           bottom: 0;
@@ -792,7 +772,6 @@
         .bnav-btn i { font-size: 16px; }
         .bnav-btn.active { color: var(--accent); }
 
-        /* Toast */
         .toast-notice {
           position: fixed;
           bottom: 80px;
@@ -809,7 +788,6 @@
           box-shadow: 0 10px 25px rgba(0,0,0,0.6);
         }
 
-        /* Footer */
         .site-footer {
           margin-top: 48px;
           padding-top: 20px;
@@ -834,11 +812,11 @@
     t.className = "toast-notice";
     t.textContent = msg;
     document.body.appendChild(t);
-    setTimeout(() => t.remove(), 2400);
+    setTimeout(function () { t.remove(); }, 2400);
   }
 
   function renderLayout() {
-    const app = document.getElementById("app");
+    const app = getAppContainer();
     app.innerHTML = `
       <div class="cinema-dim" id="cinemaDim" onclick="toggleCinemaLights()"></div>
 
@@ -852,7 +830,7 @@
             <button class="nav-item active" data-hub="lobby" onclick="openHub('lobby')">Lobby</button>
             <button class="nav-item" data-hub="anime" onclick="openHub('anime')">Anime</button>
             <button class="nav-item" data-hub="donghua" onclick="openHub('donghua')">Donghua</button>
-            <button class="nav-item" data-hub="loklok" onclick="openHub('loklok')">Film & Drama</button>
+            <button class="nav-item" data-hub="loklok" onclick="openHub('loklok')">Film &amp; Drama</button>
             <button class="nav-item" data-hub="wattpad" onclick="openHub('wattpad')">Wattpad</button>
             <button class="nav-item" data-hub="saved" onclick="openHub('saved')">Tersimpan</button>
             <button class="nav-item" data-hub="history" onclick="openHub('history')">Riwayat</button>
@@ -871,8 +849,8 @@
         <main id="viewContainer"></main>
 
         <footer class="site-footer">
-          <span><strong>${escapeHTML(COMMUNITY.name)}</strong> — ${escapeHTML(COMMUNITY.tagline)}</span>
-          <span> Bebas Iklan Pop-up • Multi-Server Streaming</span>
+          <span><strong>${escapeHTML(COMMUNITY.name)}</strong> &mdash; ${escapeHTML(COMMUNITY.tagline)}</span>
+          <span>Bebas Iklan Pop-up &bull; Multi-Server Streaming</span>
         </footer>
       </div>
 
@@ -884,7 +862,7 @@
           <i class="fa-solid fa-tv"></i><span>Anime</span>
         </button>
         <button class="bnav-btn" data-bnav="loklok" onclick="openHub('loklok')">
-          <i class="fa-solid fa-clapperboard"></i><span>Film & Drama</span>
+          <i class="fa-solid fa-clapperboard"></i><span>Film &amp; Drama</span>
         </button>
         <button class="bnav-btn" data-bnav="saved" onclick="openHub('saved')">
           <i class="fa-regular fa-bookmark"></i><span>Tersimpan</span>
@@ -892,19 +870,20 @@
       </nav>
     `;
 
-    document.addEventListener("keydown", (e) => {
+    document.addEventListener("keydown", function (e) {
       if (e.key === "/" && document.activeElement.tagName !== "INPUT") {
         e.preventDefault();
-        document.getElementById("globalSearchInput")?.focus();
+        const inp = document.getElementById("globalSearchInput");
+        if (inp) inp.focus();
       }
     });
   }
 
   function updateNavHighlight() {
-    document.querySelectorAll("#topNavLinks .nav-item").forEach((b) => {
+    document.querySelectorAll("#topNavLinks .nav-item").forEach(function (b) {
       b.classList.toggle("active", b.dataset.hub === activeHub);
     });
-    document.querySelectorAll(".bottom-nav .bnav-btn").forEach((b) => {
+    document.querySelectorAll(".bottom-nav .bnav-btn").forEach(function (b) {
       b.classList.toggle("active", b.dataset.bnav === activeHub);
     });
   }
@@ -917,25 +896,24 @@
       return;
     }
     bar.innerHTML = items
-      .map((it, idx) => {
-        if (idx === items.length - 1) return `<span>${escapeHTML(it.label)}</span>`;
-        return `<span class="clickable" onclick="${it.action}">${escapeHTML(it.label)}</span> <i class="fa-solid fa-chevron-right" style="font-size:10px;"></i>`;
+      .map(function (it, idx) {
+        if (idx === items.length - 1) return "<span>" + escapeHTML(it.label) + "</span>";
+        return '<span class="clickable" onclick="' + it.action + '">' + escapeHTML(it.label) + '</span> <i class="fa-solid fa-chevron-right" style="font-size:10px;"></i>';
       })
       .join(" ");
   }
 
-  function renderSkeletons(count = 10) {
-    let html = `<div class="poster-grid">`;
-    for (let i = 0; i < count; i++) {
-      html += `<div class="skeleton-card"><div class="sk-box"></div><div class="sk-line"></div></div>`;
+  function renderSkeletons(count) {
+    const total = count || 10;
+    let html = '<div class="poster-grid">';
+    for (let i = 0; i < total; i++) {
+      html += '<div class="skeleton-card"><div class="sk-box"></div><div class="sk-line"></div></div>';
     }
-    html += `</div>`;
-    document.getElementById("viewContainer").innerHTML = html;
+    html += "</div>";
+    const view = document.getElementById("viewContainer");
+    if (view) view.innerHTML = html;
   }
 
-  // =========================================================================
-  // 1. HALAMAN LOBBY UTAMA (SAMBUTAN & PEMISAH RUANG HIBURAN)
-  // =========================================================================
   function openHub(hubName) {
     destroyHls();
     if (lightsOff) toggleCinemaLights();
@@ -949,7 +927,7 @@
       lobby: "Cari anime, donghua, film, atau cerita...",
       anime: "Cari judul Anime (contoh: One Piece, Naruto)...",
       donghua: "Cari judul Donghua (contoh: Soul Land, BTTH)...",
-      loklok: "Cari Film / Drama Korea (contoh: Marvel, Queen of Tears)...",
+      loklok: "Cari Film / Drama Korea (contoh: Marvel, Drama)...",
       wattpad: "Cari cerita Wattpad (contoh: romantis, kampus)..."
     };
     if (searchInput && placeholders[hubName]) {
@@ -970,7 +948,8 @@
 
   function renderLobbyView() {
     setBreadcrumb([]);
-    document.getElementById("filterContainer").innerHTML = "";
+    const fc = document.getElementById("filterContainer");
+    if (fc) fc.innerHTML = "";
     const history = getWatchHistory();
     const lastWatchedHTML =
       history.length > 0
@@ -983,17 +962,17 @@
         <div style="display:flex; gap:12px; overflow-x:auto; padding-bottom:6px;">
           ${history
             .slice(0, 5)
-            .map(
-              (h) => `
+            .map(function (h) {
+              return `
             <div class="btn" style="flex:0 0 240px; justify-content:space-between; text-align:left;" onclick="resumeHistoryItem('${escapeHTML(h.hub)}', '${escapeHTML(h.seriesId)}', '${escapeHTML(h.category || 1)}')">
               <div style="overflow:hidden;">
                 <div style="font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHTML(h.title)}</div>
-                <div style="font-size:11.5px; color:var(--accent);">${escapeHTML(h.epLabel)} •${escapeHTML(h.hub.toUpperCase())}</div>
+                <div style="font-size:11.5px; color:var(--accent);">${escapeHTML(h.epLabel)} &bull; ${escapeHTML(h.hub.toUpperCase())}</div>
               </div>
               <i class="fa-solid fa-play"></i>
             </div>
-          `
-            )
+          `;
+            })
             .join("")}
         </div>
       </div>
@@ -1027,7 +1006,7 @@
           <div>
             <div class="hub-icon"><i class="fa-solid fa-dragon"></i></div>
             <h3 style="margin-top:12px;">Donghua Series</h3>
-            <p>Koleksi animasi kultivasi & fantasi Tiongkok subtitle Indonesia lengkap dengan pilihan mirror server.</p>
+            <p>Koleksi animasi kultivasi &amp; fantasi Tiongkok subtitle Indonesia lengkap dengan pilihan mirror server.</p>
           </div>
           <span class="hub-enter">Masuk ke Ruang Donghua <i class="fa-solid fa-arrow-right"></i></span>
         </div>
@@ -1035,10 +1014,10 @@
         <div class="hub-card" onclick="openHub('loklok')">
           <div>
             <div class="hub-icon"><i class="fa-solid fa-clapperboard"></i></div>
-            <h3 style="margin-top:12px;">Film & Drama (Loklok)</h3>
+            <h3 style="margin-top:12px;">Film &amp; Drama (Loklok)</h3>
             <p>Tonton film bioskop, drama Korea, drama China, dan serial populer dengan kualitas streaming HD.</p>
           </div>
-          <span class="hub-enter">Masuk ke Film & Drama <i class="fa-solid fa-arrow-right"></i></span>
+          <span class="hub-enter">Masuk ke Film &amp; Drama <i class="fa-solid fa-arrow-right"></i></span>
         </div>
 
         <div class="hub-card" onclick="openHub('wattpad')">
@@ -1059,9 +1038,6 @@
     openSeriesDetail(seriesId, Number(category) || 1);
   }
 
-  // =========================================================================
-  // 2. FILTER BAR & KATALOG MASING-MASING RUANG (TERPISAH RAPI)
-  // =========================================================================
   async function renderHubFilters() {
     const box = document.getElementById("filterContainer");
     if (!box) return;
@@ -1074,9 +1050,14 @@
         { id: "genres", label: "Daftar Genre" },
         { id: "jadwal", label: "Jadwal Rilis" }
       ];
-      box.innerHTML = `<div class="filter-bar">${tabs
-        .map((t) => `<button class="chip ${activeSubTab === t.id ? "active" : ""}" onclick="loadHubCatalog('${t.id}', 1)">${t.label}</button>`)
-        .join("")}</div>`;
+      box.innerHTML =
+        '<div class="filter-bar">' +
+        tabs
+          .map(function (t) {
+            return '<button class="chip ' + (activeSubTab === t.id ? "active" : "") + '" onclick="loadHubCatalog(\'' + t.id + '\', 1)">' + t.label + "</button>";
+          })
+          .join("") +
+        "</div>";
     } else if (activeHub === "donghua") {
       const tabs = [
         { id: "home", label: "Episode Terbaru" },
@@ -1084,31 +1065,40 @@
         { id: "completed", label: "Sudah Tamat" },
         { id: "schedule", label: "Jadwal Tayang" }
       ];
-      box.innerHTML = `<div class="filter-bar">${tabs
-        .map((t) => `<button class="chip ${activeSubTab === t.id ? "active" : ""}" onclick="loadHubCatalog('${t.id}', 1)">${t.label}</button>`)
-        .join("")}</div>`;
+      box.innerHTML =
+        '<div class="filter-bar">' +
+        tabs
+          .map(function (t) {
+            return '<button class="chip ' + (activeSubTab === t.id ? "active" : "") + '" onclick="loadHubCatalog(\'' + t.id + '\', 1)">' + t.label + "</button>";
+          })
+          .join("") +
+        "</div>";
     } else if (activeHub === "loklok") {
       if (loklokNavList.length === 0) {
         try {
           const navJson = await irohaFetch("/v1/loklok?action=nav");
           const rawNav = navJson?.data || navJson?.result || [];
           if (Array.isArray(rawNav) && rawNav.length > 0) {
-            loklokNavList = rawNav.map((n) => ({
-              id: String(n.navigationId || n.id || "1000004"),
-              name: n.name || n.title || "Kategori"
-            }));
+            loklokNavList = rawNav.map(function (n) {
+              return {
+                id: String(n.navigationId || n.id || "1000004"),
+                name: n.name || n.title || "Kategori"
+              };
+            });
           }
         } catch (e) {}
       }
       if (loklokNavList.length === 0) {
-        loklokNavList = [{ id: "1000004", name: " Pilihan Utama" }];
+        loklokNavList = [{ id: "1000004", name: "Pilihan Utama" }];
       }
-      box.innerHTML = `<div class="filter-bar">${loklokNavList
-        .map(
-          (n) =>
-            `<button class="chip ${loklokNavId === n.id ? "active" : ""}" onclick="selectLoklokNav('${escapeHTML(n.id)}')">${escapeHTML(n.name)}</button>`
-        )
-        .join("")}</div>`;
+      box.innerHTML =
+        '<div class="filter-bar">' +
+        loklokNavList
+          .map(function (n) {
+            return '<button class="chip ' + (loklokNavId === n.id ? "active" : "") + '" onclick="selectLoklokNav(\'' + escapeHTML(n.id) + '\')">' + escapeHTML(n.name) + "</button>";
+          })
+          .join("") +
+        "</div>";
     } else if (activeHub === "wattpad") {
       const topics = [
         { id: "home", label: "Populer Saat Ini" },
@@ -1118,9 +1108,14 @@
         { id: "fiksiremaja", label: "Fiksi Remaja" },
         { id: "komedi", label: "Komedi" }
       ];
-      box.innerHTML = `<div class="filter-bar">${topics
-        .map((t) => `<button class="chip ${activeSubTab === t.id ? "active" : ""}" onclick="loadWattpadTopic('${t.id}')">${t.label}</button>`)
-        .join("")}</div>`;
+      box.innerHTML =
+        '<div class="filter-bar">' +
+        topics
+          .map(function (t) {
+            return '<button class="chip ' + (activeSubTab === t.id ? "active" : "") + '" onclick="loadWattpadTopic(\'' + t.id + '\')">' + t.label + "</button>";
+          })
+          .join("") +
+        "</div>";
     } else {
       box.innerHTML = "";
     }
@@ -1136,7 +1131,6 @@
     loadHubCatalog(topic, 1);
   }
 
-  // Ekstraktor Data JSON untuk Anime, Donghua, dan Loklok
   function extractMediaArray(json) {
     const d = json?.data || json?.result || json || {};
     if (Array.isArray(d)) return d;
@@ -1148,26 +1142,27 @@
     if (Array.isArray(d.items)) return d.items;
     if (Array.isArray(d.searchResults)) return d.searchResults;
 
-    // Ekstraksi blok bertingkat khusus Loklok (recommendItems / sections)
     if (Array.isArray(d.recommendItems)) {
       const flattened = [];
-      d.recommendItems.forEach((sec) => {
+      d.recommendItems.forEach(function (sec) {
         const sub = sec.recommendContentVOList || sec.items || sec.list || [];
-        if (Array.isArray(sub)) flattened.push(...sub);
+        if (Array.isArray(sub)) flattened.push.apply(flattened, sub);
       });
       if (flattened.length > 0) return flattened;
     }
 
-    for (const k of Object.keys(d)) {
+    const keys = Object.keys(d);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
       if (Array.isArray(d[k]) && d[k].length > 0 && typeof d[k][0] === "object") return d[k];
     }
     return [];
   }
 
-  async function loadHubCatalog(subTab = "home", page = 1) {
+  async function loadHubCatalog(subTab, page) {
     destroyHls();
-    activeSubTab = subTab;
-    activePage = page;
+    activeSubTab = subTab || "home";
+    activePage = page !== undefined ? page : 1;
 
     const hubLabels = {
       anime: "Ruang Anime",
@@ -1186,50 +1181,50 @@
     try {
       if (activeHub === "wattpad") {
         const wpPath =
-          subTab === "home"
+          activeSubTab === "home"
             ? "/v1/wattpad?action=home&limit=24"
-            : `/v1/wattpad?action=search&q=${encodeURIComponent(subTab)}&limit=24`;
+            : "/v1/wattpad?action=search&q=" + encodeURIComponent(activeSubTab) + "&limit=24";
         const wpJson = await irohaFetch(wpPath);
         return renderWattpadCatalog(wpJson);
       }
 
       if (activeHub === "loklok") {
-        const lkPage = Math.max(0, Number(page) || 0);
+        const lkPage = Math.max(0, Number(activePage) || 0);
         activePage = lkPage;
         const lkJson = await irohaFetch(
-          `/v1/loklok?action=home&navigationId=${encodeURIComponent(loklokNavId)}&page=${lkPage}`
+          "/v1/loklok?action=home&navigationId=" + encodeURIComponent(loklokNavId) + "&page=" + lkPage
         );
         const lkList = extractMediaArray(lkJson);
-        return renderPosterCatalog(lkList, `Katalog Film & Drama`, true, true);
+        return renderPosterCatalog(lkList, "Katalog Film & Drama", true, true);
       }
 
       if (activeHub === "anime") {
-        if (subTab === "genres") {
+        if (activeSubTab === "genres") {
           const gJson = await irohaFetch("/v1/anime/streaming/genres");
           return renderAnimeGenres(gJson);
         }
-        if (subTab === "jadwal") {
+        if (activeSubTab === "jadwal") {
           const sJson = await irohaFetch("/v1/anime/streaming/jadwal");
           return renderScheduleView(sJson);
         }
         let path = "/v1/anime/streaming/home";
-        if (subTab === "home" && page > 1) path = `/v1/anime/streaming/ongoing?page=${page}`;
-        else if (subTab === "ongoing") path = `/v1/anime/streaming/ongoing?page=${page}`;
-        else if (subTab === "complete") path = `/v1/anime/streaming/complete?page=${page}`;
-        else if (subTab === "genre-detail") path = `/v1/anime/streaming/genre/${encodeURIComponent(activeGenreId)}?page=${page}`;
+        if (activeSubTab === "home" && activePage > 1) path = "/v1/anime/streaming/ongoing?page=" + activePage;
+        else if (activeSubTab === "ongoing") path = "/v1/anime/streaming/ongoing?page=" + activePage;
+        else if (activeSubTab === "complete") path = "/v1/anime/streaming/complete?page=" + activePage;
+        else if (activeSubTab === "genre-detail") path = "/v1/anime/streaming/genre/" + encodeURIComponent(activeGenreId) + "?page=" + activePage;
 
         const aJson = await irohaFetch(path);
         const aList = extractMediaArray(aJson);
-        const title = subTab === "genre-detail" ? `Genre: ${activeGenreName}` : "Daftar Anime";
+        const title = activeSubTab === "genre-detail" ? "Genre: " + activeGenreName : "Daftar Anime";
         return renderPosterCatalog(aList, title, true, false);
       }
 
       if (activeHub === "donghua") {
-        if (subTab === "schedule") {
+        if (activeSubTab === "schedule") {
           const dSched = await irohaFetch("/v1/donghub?action=schedule");
           return renderScheduleView(dSched);
         }
-        const dJson = await irohaFetch(`/v1/donghub?action=${encodeURIComponent(subTab)}&page=${page}`);
+        const dJson = await irohaFetch("/v1/donghub?action=" + encodeURIComponent(activeSubTab) + "&page=" + activePage);
         const dList = extractMediaArray(dJson);
         return renderPosterCatalog(dList, "Daftar Donghua", true, false);
       }
@@ -1237,16 +1232,16 @@
       document.getElementById("viewContainer").innerHTML = `
         <div class="surface-card" style="text-align:center; padding:36px 20px;">
           <p style="color:var(--text-secondary); margin-bottom:12px;">Koneksi ke sumber sedang padat atau halaman telah habis.</p>
-          <button class="btn primary" onclick="loadHubCatalog('${subTab}', ${activeHub === 'loklok' ? 0 : 1})">Muat Ulang</button>
+          <button class="btn primary" onclick="loadHubCatalog('${activeSubTab}', ${activeHub === "loklok" ? 0 : 1})">Muat Ulang</button>
         </div>
       `;
     }
   }
 
-  // Pencarian Lintas Modul
   async function submitSearch(e) {
     e.preventDefault();
-    const q = document.getElementById("globalSearchInput")?.value.trim();
+    const inp = document.getElementById("globalSearchInput");
+    const q = inp ? inp.value.trim() : "";
     if (!q) return;
 
     if (activeHub === "lobby" || activeHub === "saved" || activeHub === "history") {
@@ -1259,39 +1254,37 @@
 
     try {
       if (activeHub === "wattpad") {
-        const wpJson = await irohaFetch(`/v1/wattpad?action=search&q=${encodeURIComponent(q)}&limit=25`);
-        return renderWattpadCatalog(wpJson, `Hasil Pencarian Wattpad: "${q}"`);
+        const wpJson = await irohaFetch("/v1/wattpad?action=search&q=" + encodeURIComponent(q) + "&limit=25");
+        return renderWattpadCatalog(wpJson, 'Hasil Pencarian Wattpad: "' + q + '"');
       }
       if (activeHub === "loklok") {
-        const lkJson = await irohaFetch(`/v1/loklok?action=search&query=${encodeURIComponent(q)}&size=24`);
+        const lkJson = await irohaFetch("/v1/loklok?action=search&query=" + encodeURIComponent(q) + "&size=24");
         const lkList = extractMediaArray(lkJson);
-        return renderPosterCatalog(lkList, `Hasil Pencarian Film/Drama: "${q}"`, false, true);
+        return renderPosterCatalog(lkList, 'Hasil Pencarian Film/Drama: "' + q + '"', false, true);
       }
       if (activeHub === "donghua") {
-        const dJson = await irohaFetch(`/v1/donghub?action=search&q=${encodeURIComponent(q)}`);
+        const dJson = await irohaFetch("/v1/donghub?action=search&q=" + encodeURIComponent(q));
         const dList = extractMediaArray(dJson);
-        return renderPosterCatalog(dList, `Hasil Pencarian Donghua: "${q}"`, false, false);
+        return renderPosterCatalog(dList, 'Hasil Pencarian Donghua: "' + q + '"', false, false);
       }
-      const aJson = await irohaFetch(`/v1/anime/streaming/search?q=${encodeURIComponent(q)}`);
+      const aJson = await irohaFetch("/v1/anime/streaming/search?q=" + encodeURIComponent(q));
       const aList = extractMediaArray(aJson);
-      return renderPosterCatalog(aList, `Hasil Pencarian Anime: "${q}"`, false, false);
+      return renderPosterCatalog(aList, 'Hasil Pencarian Anime: "' + q + '"', false, false);
     } catch (err) {
-      document.getElementById("viewContainer").innerHTML = `
-        <div class="surface-card" style="text-align:center;">Tidak ditemukan hasil untuk "${escapeHTML(q)}".</div>
-      `;
+      document.getElementById("viewContainer").innerHTML =
+        '<div class="surface-card" style="text-align:center;">Tidak ditemukan hasil untuk "' + escapeHTML(q) + '".</div>';
     }
   }
 
-  // Render Grid Poster (Anime, Donghua, Loklok)
-  function renderPosterCatalog(list, sectionTitle, withPagination = true, isLoklok = false) {
+  function renderPosterCatalog(list, sectionTitle, withPagination, isLoklok) {
     const view = document.getElementById("viewContainer");
     if (!Array.isArray(list) || list.length === 0) {
-      view.innerHTML = `<div class="surface-card" style="text-align:center;">Belum ada tayangan di halaman ini.</div>`;
+      view.innerHTML = '<div class="surface-card" style="text-align:center;">Belum ada tayangan di halaman ini.</div>';
       return;
     }
 
     const cards = list
-      .map((item) => {
+      .map(function (item) {
         const id = item.animeId || item.slug || item.id || item.contentId || item.jumpAddress || "";
         const rawTitle = item.title || item.name || "Tayangan";
         const displayTitle = cleanTitle(rawTitle);
@@ -1305,8 +1298,8 @@
 
         const isDirectDonghuaEp = activeHub === "donghua" && String(id).includes("episode");
         const onClick = isDirectDonghuaEp
-          ? `openWatchPlayer('${escapeHTML(id)}', '${escapeHTML(displayTitle)}', '', 1)`
-          : `openSeriesDetail('${escapeHTML(id)}', ${Number(category) || 1}, '${escapeHTML(displayTitle)}', '${escapeHTML(poster)}')`;
+          ? "openWatchPlayer('" + escapeHTML(id) + "', '" + escapeHTML(displayTitle) + "', '', 1)"
+          : "openSeriesDetail('" + escapeHTML(id) + "', " + (Number(category) || 1) + ", '" + escapeHTML(displayTitle) + "', '" + escapeHTML(poster) + "')";
 
         return `
           <div class="media-card" onclick="${onClick}">
@@ -1361,19 +1354,19 @@
     fetchMissingCover(img);
   }
 
-  // Render Ruang Baca Wattpad (/v1/wattpad)
-  function renderWattpadCatalog(json, titleHeading = "Cerita Wattpad Populer") {
+  function renderWattpadCatalog(json, titleHeading) {
+    const heading = titleHeading || "Cerita Wattpad Populer";
     const d = json?.data || json?.result || json || {};
     const stories = Array.isArray(d) ? d : d.stories || d.list || d.results || [];
     const view = document.getElementById("viewContainer");
 
     if (!Array.isArray(stories) || stories.length === 0) {
-      view.innerHTML = `<div class="surface-card" style="text-align:center;">Tidak ada cerita Wattpad yang ditemukan.</div>`;
+      view.innerHTML = '<div class="surface-card" style="text-align:center;">Tidak ada cerita Wattpad yang ditemukan.</div>';
       return;
     }
 
     const cards = stories
-      .map((st) => {
+      .map(function (st) {
         const title = st.title || "Cerita Wattpad";
         const author = typeof st.author === "object" ? st.author?.name || st.author?.username : st.author || st.user || "Penulis";
         const reads = formatNumber(st.reads || st.readCount || 0);
@@ -1391,7 +1384,7 @@
               <div class="wp-stats">
                 <span><i class="fa-regular fa-eye"></i> ${reads}</span>
                 <span><i class="fa-regular fa-star"></i> ${votes}</span>
-                <span>• ${escapeHTML(status)}</span>
+                <span>&bull; ${escapeHTML(status)}</span>
               </div>
               <a href="${escapeHTML(url)}" target="_blank" rel="noopener noreferrer" class="btn primary" style="padding:6px 12px; font-size:12px;">
                 Baca di Wattpad <i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i>
@@ -1403,7 +1396,7 @@
       .join("");
 
     view.innerHTML = `
-      <div class="section-header"><h2>${escapeHTML(titleHeading)}</h2></div>
+      <div class="section-header"><h2>${escapeHTML(heading)}</h2></div>
       <div class="wattpad-grid">${cards}</div>
     `;
   }
@@ -1417,10 +1410,10 @@
         <h3 style="margin-bottom:14px;">Pilih Genre Anime</h3>
         <div class="ep-grid">
           ${list
-            .map((g) => {
+            .map(function (g) {
               const id = g.genreId || g.slug || g.id || "";
               const name = g.title || g.name || id;
-              return `<button class="ep-item" onclick="selectAnimeGenre('${escapeHTML(id)}', '${escapeHTML(name)}')">${escapeHTML(name)}</button>`;
+              return '<button class="ep-item" onclick="selectAnimeGenre(\'' + escapeHTML(id) + "', '" + escapeHTML(name) + '\')">' + escapeHTML(name) + "</button>";
             })
             .join("")}
         </div>
@@ -1441,18 +1434,20 @@
     if (!Array.isArray(days) || days.length === 0) {
       const flat = extractMediaArray(json);
       if (flat.length > 0) return renderPosterCatalog(flat, "Jadwal Rilis", false, false);
-      view.innerHTML = `<div class="surface-card">Jadwal belum tersedia.</div>`;
+      view.innerHTML = '<div class="surface-card">Jadwal belum tersedia.</div>';
       return;
     }
     view.innerHTML = days
-      .map((day) => {
+      .map(function (day) {
         const list = day.animeList || day.list || day.items || [];
         return `
           <div class="surface-card">
             <h3 style="color:var(--accent); margin-bottom:12px;">${escapeHTML(day.day || day.title || "Hari")}</h3>
             <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px;">
               ${list
-                .map((x) => `<button class="ep-item" style="text-align:left;" onclick="openSeriesDetail('${escapeHTML(x.animeId \vert{}\vert{} x.slug \vert{}\vert{} x.id)}', 1)">${escapeHTML(x.title || x.name)}</button>`)
+                .map(function (x) {
+                  return '<button class="ep-item" style="text-align:left;" onclick="openSeriesDetail(\'' + escapeHTML(x.animeId || x.slug || x.id) + '\', 1)">' + escapeHTML(x.title || x.name) + "</button>";
+                })
                 .join("")}
             </div>
           </div>
@@ -1461,66 +1456,67 @@
       .join("");
   }
 
-  // =========================================================================
-  // 3. HALAMAN DETAIL SERIES & DAFTAR EPISODE RAPI (DENGAN FILTER RENTANG)
-  // =========================================================================
-  async function openSeriesDetail(id, category = 1, fallbackTitle = "", fallbackPoster = "") {
+  async function openSeriesDetail(id, category, fallbackTitle, fallbackPoster) {
     if (!id) return;
+    const cat = category !== undefined ? category : 1;
+    const fbTitle = fallbackTitle || "";
+    const fbPoster = fallbackPoster || "";
+
     destroyHls();
     setBreadcrumb([
       { label: "Lobby", action: "openHub('lobby')" },
-      { label: activeHub.toUpperCase(), action: `openHub('${activeHub}')` },
+      { label: activeHub.toUpperCase(), action: "openHub('" + activeHub + "')" },
       { label: "Detail Tayangan", action: "" }
     ]);
 
-    document.getElementById("viewContainer").innerHTML = `<div class="surface-card" style="text-align:center; padding:40px;">Memuat rincian tayangan & daftar episode...</div>`;
+    document.getElementById("viewContainer").innerHTML = '<div class="surface-card" style="text-align:center; padding:40px;">Memuat rincian tayangan &amp; daftar episode...</div>';
 
     try {
-      let title = fallbackTitle;
-      let poster = fallbackPoster;
+      let title = fbTitle;
+      let poster = fbPoster;
       let synopsis = "Pilih nomor episode di bawah untuk mulai menonton.";
       let eps = [];
 
       if (activeHub === "loklok") {
         const lkJson = await irohaFetch(
-          `/v1/loklok?action=episodes&id=${encodeURIComponent(id)}&category=${encodeURIComponent(category)}`
+          "/v1/loklok?action=episodes&id=" + encodeURIComponent(id) + "&category=" + encodeURIComponent(cat)
         );
         const d = lkJson?.data || lkJson?.result || lkJson || {};
-        title = d.name || d.title || fallbackTitle || "Film / Drama";
-        poster = resolvePoster(d) || fallbackPoster;
+        title = d.name || d.title || fbTitle || "Film / Drama";
+        poster = resolvePoster(d) || fbPoster;
         synopsis = d.introduction || d.synopsis || d.description || synopsis;
         const rawList = d.episodeVo || d.episodes || d.episodeList || (Array.isArray(d) ? d : []);
 
         if (Array.isArray(rawList) && rawList.length > 0) {
-          eps = rawList.map((ep, i) => {
+          eps = rawList.map(function (ep, i) {
             const vid = ep.id || ep.vid || ep.episodeId || "";
             const no = ep.seriesNo || ep.episode || i + 1;
             return {
               epId: String(vid),
-              label: `Ep ${no}`,
-              fullTitle: `${title} - Episode ${no}`,
+              label: "Ep " + no,
+              fullTitle: title + " - Episode " + no,
               contentId: id,
-              category: category
+              category: cat
             };
           });
         } else if (d.id || id) {
-          eps = [{ epId: String(d.vid || d.id || id), label: "Putar Film", fullTitle: title, contentId: id, category: category }];
+          eps = [{ epId: String(d.vid || d.id || id), label: "Putar Film", fullTitle: title, contentId: id, category: cat }];
         }
       } else {
         const path =
           activeHub === "anime"
-            ? `/v1/anime/streaming/anime/${encodeURIComponent(id)}`
-            : `/v1/donghub?action=detail&slug=${encodeURIComponent(id)}`;
+            ? "/v1/anime/streaming/anime/" + encodeURIComponent(id)
+            : "/v1/donghub?action=detail&slug=" + encodeURIComponent(id);
         const json = await irohaFetch(path);
         const d = json?.data?.details || json?.data || json?.result || json || {};
-        title = cleanTitle(d.title || d.name || fallbackTitle || id);
-        poster = resolvePoster(d) || fallbackPoster;
+        title = cleanTitle(d.title || d.name || fbTitle || id);
+        poster = resolvePoster(d) || fbPoster;
         synopsis = Array.isArray(d.synopsis?.paragraphs)
           ? d.synopsis.paragraphs.join(" ")
           : d.synopsis || d.description || d.desc || synopsis;
 
         const rawList = d.episodeList || d.episodes || d.chapterList || [];
-        eps = rawList.map((ep, idx) => {
+        eps = rawList.map(function (ep, idx) {
           const epId = ep.episodeId || ep.slug || ep.id || "";
           const rawEpName = ep.title || ep.name || String(ep.eps || rawList.length - idx);
           return {
@@ -1533,7 +1529,7 @@
         });
       }
 
-      currentSeries = { id, hub: activeHub, title, poster, synopsis, category };
+      currentSeries = { id: id, hub: activeHub, title: title, poster: poster, synopsis: synopsis, category: cat };
       currentEpisodes = eps;
       activeEpRange = 0;
 
@@ -1542,7 +1538,7 @@
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       if (activeHub === "donghua") {
-        return openWatchPlayer(id, fallbackTitle || id, id, 1);
+        return openWatchPlayer(id, fbTitle || id, id, 1);
       }
       document.getElementById("viewContainer").innerHTML = `
         <div class="surface-card" style="text-align:center;">
@@ -1558,7 +1554,6 @@
     const saved = isItemSaved(s.id);
     const totalEps = currentEpisodes.length;
 
-    // Buat tab rentang per 50 episode jika episodenya banyak
     let rangeTabsHTML = "";
     if (totalEps > 50) {
       const chunks = Math.ceil(totalEps / 50);
@@ -1566,9 +1561,9 @@
       for (let i = 0; i < chunks; i++) {
         const start = i * 50 + 1;
         const end = Math.min((i + 1) * 50, totalEps);
-        tabs += `<button class="chip ${activeEpRange === i ? "active" : ""}" onclick="setEpRange(${i})">${start} - ${end}</button>`;
+        tabs += '<button class="chip ' + (activeEpRange === i ? "active" : "") + '" onclick="setEpRange(' + i + ')">' + start + " - " + end + "</button>";
       }
-      rangeTabsHTML = `<div class="filter-bar" style="margin-bottom:12px;">${tabs}</div>`;
+      rangeTabsHTML = '<div class="filter-bar" style="margin-bottom:12px;">' + tabs + "</div>";
     }
 
     document.getElementById("viewContainer").innerHTML = `
@@ -1614,19 +1609,19 @@
     renderSeriesDetailUI();
   }
 
-  function renderEpisodeChunk(customList = null) {
+  function renderEpisodeChunk(customList) {
     const box = document.getElementById("epGridList");
     if (!box) return;
     const slice = customList || currentEpisodes.slice(activeEpRange * 50, (activeEpRange + 1) * 50);
 
     if (slice.length === 0) {
-      box.innerHTML = `<p style="color:var(--text-secondary); grid-column:1/-1;">Episode tidak ditemukan.</p>`;
+      box.innerHTML = '<p style="color:var(--text-secondary); grid-column:1/-1;">Episode tidak ditemukan.</p>';
       return;
     }
 
     box.innerHTML = slice
-      .map((ep) => {
-        const watched = isEpWatched(`${currentSeries.hub}_${ep.epId}`);
+      .map(function (ep) {
+        const watched = isEpWatched(currentSeries.hub + "_" + ep.epId);
         return `
           <button class="ep-item ${watched ? "watched" : ""}" onclick="openWatchPlayer('${escapeHTML(ep.epId)}', '${escapeHTML(ep.fullTitle)}', '${escapeHTML(ep.contentId)}', ${ep.category})">
             ${watched ? '<i class="fa-solid fa-check" style="font-size:10px;margin-right:3px;"></i>' : ""}${escapeHTML(ep.label)}
@@ -1639,17 +1634,15 @@
   function searchEpisodeNumber(q) {
     const clean = q.trim().toLowerCase();
     if (!clean) return renderEpisodeChunk();
-    const filtered = currentEpisodes.filter((ep) => ep.label.toLowerCase().includes(clean));
+    const filtered = currentEpisodes.filter(function (ep) { return ep.label.toLowerCase().includes(clean); });
     renderEpisodeChunk(filtered);
   }
 
-  // =========================================================================
-  // 4. PEMUTAR VIDEO STREAMING (ANIME + DONGHUA + LOKLOK HLS)
-  // =========================================================================
-  async function openWatchPlayer(epId, epTitle = "", seriesId = "", category = 1) {
+  async function openWatchPlayer(epId, epTitle, seriesId, category) {
     if (!epId) return;
+    const cat = category !== undefined ? category : 1;
     destroyHls();
-    markEpWatched(`${activeHub}_${epId}`);
+    markEpWatched(activeHub + "_" + epId);
 
     if (currentSeries) {
       recordWatchHistory({
@@ -1657,52 +1650,50 @@
         seriesId: seriesId || currentSeries.id,
         title: currentSeries.title,
         epLabel: cleanEpNumber(epTitle, 1),
-        category: category
+        category: cat
       });
     }
 
     setBreadcrumb([
       { label: "Lobby", action: "openHub('lobby')" },
-      { label: activeHub.toUpperCase(), action: `openHub('${activeHub}')` },
+      { label: activeHub.toUpperCase(), action: "openHub('" + activeHub + "')" },
       { label: "Pemutar Video", action: "" }
     ]);
 
-    document.getElementById("viewContainer").innerHTML = `<div class="surface-card" style="text-align:center; padding:40px;">Menyiapkan aliran video...</div>`;
+    document.getElementById("viewContainer").innerHTML = '<div class="surface-card" style="text-align:center; padding:40px;">Menyiapkan aliran video...</div>';
 
     try {
-      // A. Mode Loklok (/v1/loklok?action=stream&id=...&vid=...&category=...)
       if (activeHub === "loklok") {
         const cId = seriesId || currentSeries?.id || "";
         const lkJson = await irohaFetch(
-          `/v1/loklok?action=stream&id=${encodeURIComponent(cId)}&vid=${encodeURIComponent(epId)}&category=${encodeURIComponent(category)}&definition=GROOT_HD`
+          "/v1/loklok?action=stream&id=" + encodeURIComponent(cId) + "&vid=" + encodeURIComponent(epId) + "&category=" + encodeURIComponent(cat) + "&definition=GROOT_HD"
         );
         const d = lkJson?.data || lkJson?.result || {};
         const mainUrl = d.mediaUrl || d.url || d.watchUrl || "";
         const qualities = Array.isArray(d.qualities) ? d.qualities : [];
 
         activeServers = qualities.length > 0
-          ? qualities.map((q, i) => ({ name: q.quality || q.definition || `Kualitas ${i + 1}`, url: q.mediaUrl || q.url }))
+          ? qualities.map(function (q, i) { return { name: q.quality || q.definition || "Kualitas " + (i + 1), url: q.mediaUrl || q.url }; })
           : [{ name: "GROOT HD", url: mainUrl }];
 
         return renderWatchStage({
           title: epTitle || currentSeries?.title || "Pemutar Film & Drama",
           seriesId: cId,
-          category,
+          category: cat,
           initialUrl: mainUrl,
           prevEp: "",
           nextEp: ""
         });
       }
 
-      // B. Mode Donghua (/v1/donghub?action=watch&slug=...)
       if (activeHub === "donghua") {
-        const dJson = await irohaFetch(`/v1/donghub?action=watch&slug=${encodeURIComponent(epId)}`);
+        const dJson = await irohaFetch("/v1/donghub?action=watch&slug=" + encodeURIComponent(epId));
         const d = dJson?.data || dJson?.result || {};
         const servers = Array.isArray(d.servers) ? d.servers : [];
-        activeServers = servers.map((s, i) => ({ name: s.name || `Server ${i + 1}`, url: s.url }));
+        activeServers = servers.map(function (s, i) { return { name: s.name || "Server " + (i + 1), url: s.url }; });
 
         return renderWatchStage({
-          title: cleanTitle(d.title || epTitle) + " — " + cleanEpNumber(d.title || epTitle, 1),
+          title: cleanTitle(d.title || epTitle) + " - " + cleanEpNumber(d.title || epTitle, 1),
           seriesId: seriesId || d.seriesSlug || "",
           category: 1,
           initialUrl: d.videoUrl || servers[0]?.url || "",
@@ -1711,15 +1702,14 @@
         });
       }
 
-      // C. Mode Anime (/v1/anime/streaming/episode/:episodeId)
-      const aJson = await irohaFetch(`/v1/anime/streaming/episode/${encodeURIComponent(epId)}`);
+      const aJson = await irohaFetch("/v1/anime/streaming/episode/" + encodeURIComponent(epId));
       const d = aJson?.data?.details || aJson?.data || aJson || {};
       let srvList = [];
       if (Array.isArray(d.server?.qualities)) {
-        d.server.qualities.forEach((q) => {
-          (q.serverList || []).forEach((s) => {
+        d.server.qualities.forEach(function (q) {
+          (q.serverList || []).forEach(function (s) {
             srvList.push({
-              name: `${s.title || "Server"} (${q.title || "HD"})`,
+              name: (s.title || "Server") + " (" + (q.title || "HD") + ")",
               sid: s.serverId || s.sid || s.id || "",
               url: s.url || "",
               ep: epId
@@ -1727,12 +1717,14 @@
           });
         });
       } else if (Array.isArray(d.servers || d.serverList)) {
-        srvList = (d.servers || d.serverList).map((s, i) => ({
-          name: s.name || s.title || `Server ${i + 1}`,
-          sid: s.serverId || s.sid || s.id || "",
-          url: s.url || "",
-          ep: epId
-        }));
+        srvList = (d.servers || d.serverList).map(function (s, i) {
+          return {
+            name: s.name || s.title || "Server " + (i + 1),
+            sid: s.serverId || s.sid || s.id || "",
+            url: s.url || "",
+            ep: epId
+          };
+        });
       }
 
       activeServers = srvList;
@@ -1762,10 +1754,9 @@
 
   function renderWatchStage(cfg) {
     const srvBtns = activeServers
-      .map(
-        (s, idx) =>
-          `<button class="chip srv-chip ${idx === 0 ? "active" : ""}" onclick="switchVideoServer(${idx})">${escapeHTML(s.name)}</button>`
-      )
+      .map(function (s, idx) {
+        return '<button class="chip srv-chip ' + (idx === 0 ? "active" : "") + '" onclick="switchVideoServer(' + idx + ')">' + escapeHTML(s.name) + "</button>";
+      })
       .join("");
 
     document.getElementById("viewContainer").innerHTML = `
@@ -1801,11 +1792,11 @@
   async function switchVideoServer(idx) {
     const srv = activeServers[idx];
     if (!srv) return;
-    document.querySelectorAll(".srv-chip").forEach((b, i) => b.classList.toggle("active", i === idx));
+    document.querySelectorAll(".srv-chip").forEach(function (b, i) { b.classList.toggle("active", i === idx); });
 
     const stage = document.getElementById("videoBoxStage");
     if (stage) {
-      stage.innerHTML = `<div style="display:flex;height:100%;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px;">Menghubungkan ke ${escapeHTML(srv.name)}...</div>`;
+      stage.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px;">Menghubungkan ke ' + escapeHTML(srv.name) + "...</div>";
     }
 
     try {
@@ -1813,7 +1804,7 @@
         return playStreamUrl(srv.url);
       }
       const resJson = await irohaFetch(
-        `/v1/anime/streaming/server-stream?sid=${encodeURIComponent(srv.sid)}&ep=${encodeURIComponent(srv.ep || "")}`
+        "/v1/anime/streaming/server-stream?sid=" + encodeURIComponent(srv.sid) + "&ep=" + encodeURIComponent(srv.ep || "")
       );
       const d = resJson?.data || resJson || {};
       const targetUrl = d.manifestUrl || d.hlsUrl || d.url || d.streamingUrl || d.embedUrl || "";
@@ -1837,7 +1828,7 @@
 
     let finalUrl = rawUrl;
     if (finalUrl.startsWith("/")) {
-      finalUrl = `${DIRECT_BASE}${finalUrl}${finalUrl.includes("?") ? "&" : "?"}apikey=${FALLBACK_KEY}`;
+      finalUrl = DIRECT_BASE + finalUrl + (finalUrl.includes("?") ? "&" : "?") + "apikey=" + FALLBACK_KEY;
     }
 
     const isDirectVideo =
@@ -1846,7 +1837,7 @@
       finalUrl.includes(".mp4");
 
     if (isDirectVideo) {
-      stage.innerHTML = `<video id="activeVideoEl" controls autoplay playsinline></video>`;
+      stage.innerHTML = '<video id="activeVideoEl" controls autoplay playsinline></video>';
       const video = document.getElementById("activeVideoEl");
 
       if ((finalUrl.includes(".m3u8") || finalUrl.includes("/stream/manifest")) && window.Hls && window.Hls.isSupported()) {
@@ -1857,7 +1848,7 @@
         video.src = finalUrl;
       }
     } else {
-      stage.innerHTML = `<iframe src="${escapeHTML(finalUrl)}" allowfullscreen allow="autoplay; encrypted-media"></iframe>`;
+      stage.innerHTML = '<iframe src="' + escapeHTML(finalUrl) + '" allowfullscreen allow="autoplay; encrypted-media"></iframe>';
     }
   }
 
@@ -1867,23 +1858,21 @@
     if (dim) dim.classList.toggle("active", lightsOff);
   }
 
-  // =========================================================================
-  // 5. HALAMAN TERSIMPAN & RIWAYAT TONTONAN
-  // =========================================================================
   function renderSavedView() {
     setBreadcrumb([{ label: "Lobby", action: "openHub('lobby')" }, { label: "Daftar Tersimpan", action: "" }]);
-    document.getElementById("filterContainer").innerHTML = "";
+    const fc = document.getElementById("filterContainer");
+    if (fc) fc.innerHTML = "";
     const list = getSavedList();
     const view = document.getElementById("viewContainer");
 
     if (list.length === 0) {
-      view.innerHTML = `<div class="surface-card" style="text-align:center; padding:40px;">Belum ada tayangan yang disimpan.</div>`;
+      view.innerHTML = '<div class="surface-card" style="text-align:center; padding:40px;">Belum ada tayangan yang disimpan.</div>';
       return;
     }
 
     const cards = list
-      .map(
-        (item) => `
+      .map(function (item) {
+        return `
       <div class="media-card" onclick="resumeHistoryItem('${escapeHTML(item.hub)}', '${escapeHTML(item.id)}', '${escapeHTML(item.category || 1)}')">
         <div class="poster-wrap">
           <span class="badge-overlay">${escapeHTML(item.badge || "Tersimpan")}</span>
@@ -1893,8 +1882,8 @@
           <div class="media-title">${escapeHTML(item.title)}</div>
         </div>
       </div>
-    `
-      )
+    `;
+      })
       .join("");
 
     view.innerHTML = `
@@ -1909,12 +1898,13 @@
 
   function renderHistoryView() {
     setBreadcrumb([{ label: "Lobby", action: "openHub('lobby')" }, { label: "Riwayat Tontonan", action: "" }]);
-    document.getElementById("filterContainer").innerHTML = "";
+    const fc = document.getElementById("filterContainer");
+    if (fc) fc.innerHTML = "";
     const list = getWatchHistory();
     const view = document.getElementById("viewContainer");
 
     if (list.length === 0) {
-      view.innerHTML = `<div class="surface-card" style="text-align:center; padding:40px;">Belum ada riwayat tontonan.</div>`;
+      view.innerHTML = '<div class="surface-card" style="text-align:center; padding:40px;">Belum ada riwayat tontonan.</div>';
       return;
     }
 
@@ -1926,46 +1916,56 @@
         </div>
         <div style="display:flex; flex-direction:column; gap:10px;">
           ${list
-            .map(
-              (h) => `
+            .map(function (h) {
+              return `
             <div class="btn" style="justify-content:space-between; padding:14px;" onclick="resumeHistoryItem('${escapeHTML(h.hub)}', '${escapeHTML(h.seriesId)}', '${escapeHTML(h.category || 1)}')">
               <div>
                 <div style="font-weight:700; font-size:14px;">${escapeHTML(h.title)}</div>
-                <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${escapeHTML(h.epLabel)} • Ruang ${escapeHTML(h.hub.toUpperCase())}</div>
+                <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${escapeHTML(h.epLabel)} &bull; Ruang${escapeHTML(h.hub.toUpperCase())}</div>
               </div>
               <span style="font-size:12px; color:var(--accent);">${escapeHTML(h.time)} <i class="fa-solid fa-chevron-right"></i></span>
             </div>
-          `
-            )
+          `;
+            })
             .join("")}
         </div>
       </div>
     `;
   }
 
-  // Ekspos Fungsi ke Global Window agar Aman saat main.js di-Encode / Obfuscate
   Object.assign(window, {
-    openHub,
-    loadHubCatalog,
-    selectLoklokNav,
-    loadWattpadTopic,
-    selectAnimeGenre,
-    submitSearch,
-    openSeriesDetail,
-    setEpRange,
-    searchEpisodeNumber,
-    openWatchPlayer,
-    switchVideoServer,
-    toggleCinemaLights,
-    toggleSaveCurrent,
-    resumeHistoryItem,
-    renderSavedView,
-    renderHistoryView,
-    onImgErr
+    openHub: openHub,
+    loadHubCatalog: loadHubCatalog,
+    selectLoklokNav: selectLoklokNav,
+    loadWattpadTopic: loadWattpadTopic,
+    selectAnimeGenre: selectAnimeGenre,
+    submitSearch: submitSearch,
+    openSeriesDetail: openSeriesDetail,
+    setEpRange: setEpRange,
+    searchEpisodeNumber: searchEpisodeNumber,
+    openWatchPlayer: openWatchPlayer,
+    switchVideoServer: switchVideoServer,
+    toggleCinemaLights: toggleCinemaLights,
+    toggleSaveCurrent: toggleSaveCurrent,
+    resumeHistoryItem: resumeHistoryItem,
+    renderSavedView: renderSavedView,
+    renderHistoryView: renderHistoryView,
+    onImgErr: onImgErr
   });
 
-  // Inisialisasi Aplikasi (Dimulai dari Lobby Utama)
-  injectStyles();
-  renderLayout();
-  openHub("lobby");
+  function boot() {
+    try {
+      injectStyles();
+      renderLayout();
+      openHub("lobby");
+    } catch (err) {
+      document.body.innerHTML = '<div style="padding:24px;color:#fff;background:#0b0d14;">Gagal memuat skrip: ' + err.message + "</div>";
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
 })();
